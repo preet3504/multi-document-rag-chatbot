@@ -10,7 +10,6 @@ beautifulsoup4
 requests
 streamlit
 pypdf
-pysqlite3-binary
 sentence-transformers
 fastapi
 uvicorn
@@ -19,3 +18,4 @@ sqlalchemy
 langchain-classic
 pymysql
 cryptography
+pysqlite3-binary; sys_platform == 'linux'
