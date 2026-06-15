@@ -14,6 +14,52 @@ if "messages" not in st.session_state:
     st.session_state["messages"] = []
 if "pdf_uploaded" not in st.session_state:
     st.session_state["pdf_uploaded"] = False
+if "url_ingested" not in st.session_state:
+    st.session_state["url_ingested"] = False
+
+def show_chat_history():
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            if "sources" in message and message["sources"]:
+                with st.expander("Sources"):
+                    for source in message["sources"]:
+                        st.caption(f"- {source}")
+
+def handle_chat_input(placeholder_text: str):
+    if prompt := st.chat_input(placeholder_text):
+        st.chat_message("user").markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    payload = {
+                        "session_id": st.session_state["session_id"],
+                        "query": prompt
+                    }
+                    
+                    ans_response = requests.post(f"{API_URL}/ask", json=payload)
+                    if ans_response.status_code == 200:
+                        data = ans_response.json()
+                        answer = data.get("answer", "No answer received.")
+                        sources = data.get("sources", [])
+                        
+                        st.markdown(answer)
+                        if sources:
+                            with st.expander("Sources"):
+                                for source in sources:
+                                    st.caption(f"- {source}")
+                                    
+                        st.session_state.messages.append({
+                            "role": "assistant", 
+                            "content": answer,
+                            "sources": sources
+                        })
+                    else:
+                        st.error(f"API Error: {ans_response.text}")
+                except Exception as e:
+                    st.error(f"Failed to connect to the backend server: {e}")
 
 st.title("📚 RAG Chatbot System")
 st.markdown("Interact with your PDF documents, Websites, and Databases seamlessly.")
@@ -29,8 +75,29 @@ with st.sidebar:
     
     st.divider()
     
-    if data_source_mode == "Website Link" or data_source_mode == "From Database":
+    if data_source_mode == "From Database":
         st.warning("🚧 This functionality is currently disabled and will be implemented soon.")
+        
+    elif data_source_mode == "Website Link":
+        st.header("2. Enter Website URL")
+        url_input = st.text_input("Paste URL here:", placeholder="https://example.com")
+        
+        if url_input and not st.session_state["url_ingested"]:
+            if st.button("Ingest Website"):
+                with st.spinner("Scraping and indexing the website..."):
+                    try:
+                        response = requests.post(
+                            f"{API_URL}/upload_url", 
+                            json={"url": url_input}
+                        )
+                        
+                        if response.status_code == 200:
+                            st.success(response.json().get("message", "Website ingested!"))
+                            st.session_state["url_ingested"] = True
+                        else:
+                            st.error(f"Error indexing URL: {response.text}")
+                    except Exception as e:
+                        st.error(f"Failed to connect to the backend server: {e}")
         
     elif data_source_mode == "Upload PDF":
         st.header("2. Upload Document")
@@ -61,48 +128,16 @@ if data_source_mode == "Upload PDF":
         st.info("👈 Please upload and ingest a PDF file from the sidebar to start chatting.")
     else:
         # Display chat messages from history on app rerun
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-                if "sources" in message and message["sources"]:
-                    with st.expander("Sources"):
-                        for source in message["sources"]:
-                            st.caption(f"- {source}")
+        show_chat_history()
+        handle_chat_input("Ask a question about the PDF...")
 
-        # React to user input
-        if prompt := st.chat_input("Ask a question about the PDF..."):
-            # Display user message in chat message container
-            st.chat_message("user").markdown(prompt)
-            # Add user message to chat history
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        # Call FastAPI endpoint
-                        payload = {
-                            "session_id": st.session_state["session_id"],
-                            "query": prompt
-                        }
-                        
-                        ans_response = requests.post(f"{API_URL}/ask", json=payload)
-                        if ans_response.status_code == 200:
-                            data = ans_response.json()
-                            answer = data.get("answer", "No answer received.")
-                            sources = data.get("sources", [])
-                            
-                            st.markdown(answer)
-                            if sources:
-                                with st.expander("Sources"):
-                                    for source in sources:
-                                        st.caption(f"- {source}")
-                                        
-                            st.session_state.messages.append({
-                                "role": "assistant", 
-                                "content": answer,
-                                "sources": sources
-                            })
-                        else:
-                            st.error(f"API Error: {ans_response.text}")
-                    except Exception as e:
-                        st.error(f"Failed to connect to the backend server: {e}")
+elif data_source_mode == "Website Link":
+    st.divider()
+    st.subheader("Chat with the Website")
+    
+    if not st.session_state["url_ingested"]:
+        st.info("👈 Please enter a URL and ingest the website from the sidebar to start chatting.")
+    else:
+        # Display chat messages from history on app rerun
+        show_chat_history()
+        handle_chat_input("Ask a question about the website content...")

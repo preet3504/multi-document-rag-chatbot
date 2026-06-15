@@ -5,7 +5,7 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import os
 from dotenv import load_dotenv
 
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_groq import ChatGroq
@@ -16,7 +16,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 
 load_dotenv()
 
-class PDFRetriever:
+class RAGRetriever:
     def __init__(self, db_path: str = "./chroma_db", collection_name: str = "pdf_docs"):
         """
         Initialize the PDF Retriever with a Groq LLM, HuggingFace embeddings,
@@ -67,6 +67,33 @@ class PDFRetriever:
             
         print("PDF ingestion complete!")
 
+    def ingest_url(self, url: str):
+        """
+        Load content from a URL, split it into chunks, and store the embeddings in ChromaDB.
+        """
+        print(f"Loading URL: {url}")
+        loader = WebBaseLoader(url)
+        documents = loader.load()
+        
+        print(f"Loaded {len(documents)} document(s). Splitting text...")
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, 
+            chunk_overlap=100
+        )
+        chunks = text_splitter.split_documents(documents)
+        
+        if self.vector_store is None:
+            self.vector_store = Chroma.from_documents(
+                documents=chunks,
+                embedding=self.embeddings,
+                persist_directory=self.db_path,
+                collection_name=self.collection_name
+            )
+        else:
+            self.vector_store.add_documents(documents=chunks)
+            
+        print("URL ingestion complete!")
+
     def ask_question(self, query: str, chat_history: list = None) -> dict:
         """
         Retrieve context from the vector store and answer the user's question using Groq.
@@ -74,7 +101,7 @@ class PDFRetriever:
         Returns the answer and the sources with page numbers.
         """
         if self.vector_store is None:
-            raise ValueError("No documents loaded. Please ingest a PDF first.")
+            raise ValueError("No documents loaded. Please ingest a PDF or URL first.")
         if chat_history is None:
             chat_history = []
 
@@ -124,9 +151,13 @@ class PDFRetriever:
         # 4. Process sources
         sources = []
         for doc in response.get("context", []):
-            page_num = doc.metadata.get("page", "Unknown")
             source_file = doc.metadata.get("source", "Unknown file")
-            sources.append(f"Page {page_num} of {source_file}")
+            page_num = doc.metadata.get("page")
+            
+            if page_num is not None:
+                sources.append(f"Page {page_num} of {source_file}")
+            else:
+                sources.append(f"Source: {source_file}")
             
         return {
             "answer": response["answer"],

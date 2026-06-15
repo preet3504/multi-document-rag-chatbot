@@ -7,15 +7,15 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
 
-from pdf_retriever import PDFRetriever
+from rag_retriever import RAGRetriever
 
 app = FastAPI(title="Multi-Document RAG API", version="1.0.0")
 
 # Initialize the retriever singleton
 try:
-    retriever = PDFRetriever()
+    retriever = RAGRetriever()
 except Exception as e:
-    print(f"Warning: Failed to initialize PDFRetriever on startup: {e}")
+    print(f"Warning: Failed to initialize RAGRetriever on startup: {e}")
     retriever = None
 
 # In-memory storage for chat history keyed by a session_id
@@ -26,6 +26,9 @@ session_store = {}
 class ChatRequest(BaseModel):
     session_id: str
     query: str
+
+class WebRequest(BaseModel):
+    url: str
 
 class ChatResponse(BaseModel):
     answer: str
@@ -47,7 +50,7 @@ async def upload_pdf(file: UploadFile = File(...)):
     global retriever
     if retriever is None:
         try:
-            retriever = PDFRetriever()
+            retriever = RAGRetriever()
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed setting up Retriever. Did you provide GROQ_API_KEY? {e}")
 
@@ -64,6 +67,25 @@ async def upload_pdf(file: UploadFile = File(...)):
         os.remove(temp_file_path)
         
         return {"status": "success", "message": f"Successfully ingested {file.filename}."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/upload_url")
+async def upload_url(request: WebRequest):
+    """
+    Endpoint to process a web URL, extracting content 
+    and storing it in ChromaDB.
+    """
+    global retriever
+    if retriever is None:
+        try:
+            retriever = RAGRetriever()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed setting up Retriever. {e}")
+
+    try:
+        retriever.ingest_url(request.url)
+        return {"status": "success", "message": f"Successfully ingested {request.url}."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
