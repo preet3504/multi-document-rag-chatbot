@@ -15,3 +15,7 @@ sentence-transformers
 fastapi
 uvicorn
 python-multipart
+sqlalchemy
+langchain-classic
+pymysql
+cryptography

@@ -16,6 +16,8 @@ if "pdf_uploaded" not in st.session_state:
     st.session_state["pdf_uploaded"] = False
 if "url_ingested" not in st.session_state:
     st.session_state["url_ingested"] = False
+if "db_connected" not in st.session_state:
+    st.session_state["db_connected"] = False
 
 def show_chat_history():
     for message in st.session_state.messages:
@@ -26,7 +28,7 @@ def show_chat_history():
                     for source in message["sources"]:
                         st.caption(f"- {source}")
 
-def handle_chat_input(placeholder_text: str):
+def handle_chat_input(placeholder_text: str, mode: str = "vector"):
     if prompt := st.chat_input(placeholder_text):
         st.chat_message("user").markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -36,7 +38,8 @@ def handle_chat_input(placeholder_text: str):
                 try:
                     payload = {
                         "session_id": st.session_state["session_id"],
-                        "query": prompt
+                        "query": prompt,
+                        "mode": mode
                     }
                     
                     ans_response = requests.post(f"{API_URL}/ask", json=payload)
@@ -70,13 +73,58 @@ with st.sidebar:
     # Radio options for functionalities
     data_source_mode = st.radio(
         "Choose where your knowledge comes from:",
-        options=["Upload PDF", "Website Link", "From Database"]
+        options=["Upload PDF", "Website Link", "From Database"],
+        key="data_source"
     )
     
     st.divider()
     
     if data_source_mode == "From Database":
-        st.warning("🚧 This functionality is currently disabled and will be implemented soon.")
+        st.markdown("### 🗄️ SQL Database Connection")
+        db_type = st.radio("Database Type", ["SQLite", "MySQL"], index=0)
+        
+        if db_type == "SQLite":
+            db_url = st.text_input("Database URI", "sqlite:///test.db", help="Format: sqlite:///path_to_db")
+            if st.button("Connect to SQLite"):
+                with st.spinner("Connecting..."):
+                    try:
+                        response = requests.post(f"{API_URL}/connect_db", json={"db_type": "sqlite", "db_url": db_url})
+                        if response.status_code == 200:
+                            st.session_state.db_connected = True
+                            st.success("Connected to SQLite!")
+                        else:
+                            st.error(f"Failed to connect: {response.json().get('detail')}")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+        else: # MySQL
+            col1, col2 = st.columns(2)
+            with col1:
+                host = st.text_input("Host", "localhost")
+                user = st.text_input("Username", "root")
+            with col2:
+                port = st.number_input("Port", value=3306)
+                db_name = st.text_input("Database Name")
+            password = st.text_input("Password", type="password")
+            
+            if st.button("Connect to MySQL"):
+                with st.spinner("Connecting..."):
+                    try:
+                        payload = {
+                            "db_type": "mysql",
+                            "host": host,
+                            "user": user,
+                            "password": password,
+                            "database": db_name,
+                            "port": port
+                        }
+                        response = requests.post(f"{API_URL}/connect_db", json=payload)
+                        if response.status_code == 200:
+                            st.session_state.db_connected = True
+                            st.success("Connected to MySQL!")
+                        else:
+                            st.error(f"Failed to connect: {response.json().get('detail', 'Unknown error')}")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
         
     elif data_source_mode == "Website Link":
         st.header("2. Enter Website URL")
@@ -141,3 +189,14 @@ elif data_source_mode == "Website Link":
         # Display chat messages from history on app rerun
         show_chat_history()
         handle_chat_input("Ask a question about the website content...")
+
+elif data_source_mode == "From Database":
+    st.divider()
+    st.subheader("Chat with your Database")
+    
+    if not st.session_state["db_connected"]:
+        st.info("👈 Please enter a DB URL and connect from the sidebar to start chatting.")
+    else:
+        # Display chat messages from history on app rerun
+        show_chat_history()
+        handle_chat_input("Ask a question about your database...", mode="sql")

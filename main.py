@@ -26,9 +26,19 @@ session_store = {}
 class ChatRequest(BaseModel):
     session_id: str
     query: str
+    mode: str = "vector" # "vector" or "sql"
 
 class WebRequest(BaseModel):
     url: str
+
+class DBRequest(BaseModel):
+    db_type: str = "sqlite" # "sqlite" or "mysql"
+    db_url: Optional[str] = None
+    host: Optional[str] = None
+    user: Optional[str] = None
+    password: Optional[str] = None
+    database: Optional[str] = None
+    port: Optional[int] = 3306
 
 class ChatResponse(BaseModel):
     answer: str
@@ -89,6 +99,41 @@ async def upload_url(request: WebRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/connect_db")
+async def connect_db(request: DBRequest):
+    """
+    Endpoint to connect to a SQL database.
+    """
+    global retriever
+    if retriever is None:
+        try:
+            retriever = RAGRetriever()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed setting up Retriever. {e}")
+
+    try:
+        if request.db_type == "sqlite":
+            if not request.db_url:
+                raise HTTPException(status_code=400, detail="db_url is required for sqlite")
+            success = retriever.connect_db(request.db_url)
+        elif request.db_type == "mysql":
+            if not all([request.host, request.user, request.password, request.database]):
+                raise HTTPException(status_code=400, detail="host, user, password, and database are required for mysql")
+            # Explicitly use mysql+pymysql to avoid missing MySQLdb error
+            mysql_url = f"mysql+pymysql://{request.user}:{request.password}@{request.host}:{request.port}/{request.database}"
+            success = retriever.connect_db(mysql_url)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid db_type. Use 'sqlite' or 'mysql'.")
+
+        if success:
+            db_label = "MySQL" if request.db_type == "mysql" else request.db_url
+            return {"status": "success", "message": f"Successfully connected to {db_label}."}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to connect to database.")
+    except Exception as e:
+        print(f"Error in connect_db: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/ask", response_model=ChatResponse)
 async def ask_question(request: ChatRequest):
     """
@@ -106,7 +151,10 @@ async def ask_question(request: ChatRequest):
     chat_history = session_store[request.session_id]
     
     try:
-        result = retriever.ask_question(query=request.query, chat_history=chat_history)
+        if request.mode == "sql":
+            result = retriever.ask_sql(query=request.query)
+        else:
+            result = retriever.ask_question(query=request.query, chat_history=chat_history)
         
         # Append the new interaction to the session history
         chat_history.append(HumanMessage(content=request.query))
