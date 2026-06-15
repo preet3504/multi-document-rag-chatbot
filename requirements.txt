@@ -12,3 +12,6 @@ streamlit
 pypdf
 pysqlite3-binary
 sentence-transformers
+fastapi
+uvicorn
+python-multipart
