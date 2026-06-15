@@ -1,0 +1,108 @@
+import streamlit as st
+import requests
+import uuid
+from typing import List, Dict
+
+API_URL = "http://127.0.0.1:8000"
+
+st.set_page_config(page_title="Multi-Document RAG Chatbot", layout="wide")
+
+# Initialize session state for session ID and chat messages
+if "session_id" not in st.session_state:
+    st.session_state["session_id"] = str(uuid.uuid4())
+if "messages" not in st.session_state:
+    st.session_state["messages"] = []
+if "pdf_uploaded" not in st.session_state:
+    st.session_state["pdf_uploaded"] = False
+
+st.title("📚 RAG Chatbot System")
+st.markdown("Interact with your PDF documents, Websites, and Databases seamlessly.")
+
+with st.sidebar:
+    st.header("1. Select Data Source")
+    
+    # Radio options for functionalities
+    data_source_mode = st.radio(
+        "Choose where your knowledge comes from:",
+        options=["Upload PDF", "Website Link", "From Database"]
+    )
+    
+    st.divider()
+    
+    if data_source_mode == "Website Link" or data_source_mode == "From Database":
+        st.warning("🚧 This functionality is currently disabled and will be implemented soon.")
+        
+    elif data_source_mode == "Upload PDF":
+        st.header("2. Upload Document")
+        uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
+        
+        if uploaded_file is not None and not st.session_state["pdf_uploaded"]:
+            if st.button("Ingest PDF"):
+                with st.spinner("Uploading and indexing your PDF. This might take a moment..."):
+                    try:
+                        # Send the file to FastAPI
+                        files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
+                        response = requests.post(f"{API_URL}/upload_pdf", files=files)
+                        
+                        if response.status_code == 200:
+                            st.success(response.json().get("message", "Ingestion completed!"))
+                            st.session_state["pdf_uploaded"] = True
+                        else:
+                            st.error(f"Error indexing PDF: {response.text}")
+                    except Exception as e:
+                        st.error(f"Failed to connect to the backend server: {e}")
+
+# Main Chat Interface
+if data_source_mode == "Upload PDF":
+    st.divider()
+    st.subheader("Chat with your Document")
+    
+    if not st.session_state["pdf_uploaded"]:
+        st.info("👈 Please upload and ingest a PDF file from the sidebar to start chatting.")
+    else:
+        # Display chat messages from history on app rerun
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+                if "sources" in message and message["sources"]:
+                    with st.expander("Sources"):
+                        for source in message["sources"]:
+                            st.caption(f"- {source}")
+
+        # React to user input
+        if prompt := st.chat_input("Ask a question about the PDF..."):
+            # Display user message in chat message container
+            st.chat_message("user").markdown(prompt)
+            # Add user message to chat history
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        # Call FastAPI endpoint
+                        payload = {
+                            "session_id": st.session_state["session_id"],
+                            "query": prompt
+                        }
+                        
+                        ans_response = requests.post(f"{API_URL}/ask", json=payload)
+                        if ans_response.status_code == 200:
+                            data = ans_response.json()
+                            answer = data.get("answer", "No answer received.")
+                            sources = data.get("sources", [])
+                            
+                            st.markdown(answer)
+                            if sources:
+                                with st.expander("Sources"):
+                                    for source in sources:
+                                        st.caption(f"- {source}")
+                                        
+                            st.session_state.messages.append({
+                                "role": "assistant", 
+                                "content": answer,
+                                "sources": sources
+                            })
+                        else:
+                            st.error(f"API Error: {ans_response.text}")
+                    except Exception as e:
+                        st.error(f"Failed to connect to the backend server: {e}")

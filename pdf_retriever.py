@@ -25,7 +25,7 @@ class PDFRetriever:
         if not os.getenv("GROQ_API_KEY"):
             raise ValueError("GROQ_API_KEY environment variable is not set.")
             
-        self.llm = ChatGroq(model="llama3-8b-8192", temperature=0.2)
+        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.2)
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         
         self.db_path = db_path

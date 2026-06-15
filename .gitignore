@@ -3,4 +3,4 @@ venv
 .env
 env
 __pycache__
-c
+chroma_db
