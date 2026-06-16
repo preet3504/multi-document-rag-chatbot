@@ -12,8 +12,8 @@ if "session_id" not in st.session_state:
     st.session_state["session_id"] = str(uuid.uuid4())
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
-if "pdf_uploaded" not in st.session_state:
-    st.session_state["pdf_uploaded"] = False
+if "pdf_ingested_name" not in st.session_state:
+    st.session_state["pdf_ingested_name"] = None
 if "url_ingested" not in st.session_state:
     st.session_state["url_ingested"] = False
 if "db_connected" not in st.session_state:
@@ -151,7 +151,7 @@ with st.sidebar:
         st.header("2. Upload Document")
         uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
         
-        if uploaded_file is not None and not st.session_state["pdf_uploaded"]:
+        if uploaded_file is not None and st.session_state["pdf_ingested_name"] != uploaded_file.name:
             if st.button("Ingest PDF"):
                 with st.spinner("Uploading and indexing your PDF. This might take a moment..."):
                     try:
@@ -161,7 +161,7 @@ with st.sidebar:
                         
                         if response.status_code == 200:
                             st.success(response.json().get("message", "Ingestion completed!"))
-                            st.session_state["pdf_uploaded"] = True
+                            st.session_state["pdf_ingested_name"] = uploaded_file.name
                         else:
                             st.error(f"Error indexing PDF: {response.text}")
                     except Exception as e:
@@ -172,7 +172,7 @@ if data_source_mode == "Upload PDF":
     st.divider()
     st.subheader("Chat with your Document")
     
-    if not st.session_state["pdf_uploaded"]:
+    if not st.session_state["pdf_ingested_name"]:
         st.info("👈 Please upload and ingest a PDF file from the sidebar to start chatting.")
     else:
         # Display chat messages from history on app rerun

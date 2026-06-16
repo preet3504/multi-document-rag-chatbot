@@ -35,7 +35,7 @@ class RAGRetriever:
             raise ValueError("GROQ_API_KEY environment variable is not set.")
             
         self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.2)
-        self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        self.embeddings = HuggingFaceEmbeddings(model_name="Qwen/Qwen3-Embedding-8B")
         
         self.db_path = db_path
         self.collection_name = collection_name
