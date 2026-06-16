@@ -19,3 +19,4 @@ langchain-classic
 pymysql
 cryptography
 pysqlite3-binary; sys_platform == 'linux'
+pymupdf
