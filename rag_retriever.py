@@ -8,7 +8,8 @@ except ImportError:
 import os
 from dotenv import load_dotenv
 
-from langchain_community.document_loaders import PyMuPDFLoader, WebBaseLoader
+from langchain_community.document_loaders import WebBaseLoader
+from langchain_pdfmux import PDFMuxLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_groq import ChatGroq
@@ -35,7 +36,7 @@ class RAGRetriever:
             raise ValueError("GROQ_API_KEY environment variable is not set.")
             
         self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.2)
-        self.embeddings = HuggingFaceEmbeddings(model_name="Qwen/Qwen3-Embedding-8B")
+        self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         
         self.db_path = db_path
         self.collection_name = collection_name
@@ -56,7 +57,7 @@ class RAGRetriever:
         Includes page metadata automatically via PyPDFLoader.
         """
         print(f"Loading PDF: {pdf_path}")
-        loader = PyMuPDFLoader(pdf_path)
+        loader = PDFMuxLoader(pdf_path, quality="high")
         documents = loader.load()
         
         print(f"Loaded {len(documents)} pages. Splitting text...")

@@ -4,6 +4,7 @@ langchain-groq
 langchain-community
 langchain-text-splitters
 langchain-chroma
+langchain-pdfmux
 chromadb
 python-dotenv
 beautifulsoup4
@@ -19,4 +20,4 @@ langchain-classic
 pymysql
 cryptography
 pysqlite3-binary; sys_platform == 'linux'
-pymupdf
+langchain-pdfmux
