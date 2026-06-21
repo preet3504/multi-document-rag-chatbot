@@ -16,13 +16,14 @@ from langchain_groq import ChatGroq
 from langchain_classic.chains import create_retrieval_chain, create_history_aware_retriever
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.utilities import SQLDatabase
 from langchain_classic.chains import create_sql_query_chain
 from langchain_community.tools.sql_database.tool import QuerySQLDataBaseTool
 from operator import itemgetter
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.retrievers import BaseRetriever
 
 load_dotenv()
 
@@ -34,16 +35,19 @@ class RAGRetriever:
         """
         if not os.getenv("GROQ_API_KEY"):
             raise ValueError("GROQ_API_KEY environment variable is not set.")
-            
+
         self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.2)
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        
+
         self.db_path = db_path
         self.collection_name = collection_name
         self.vector_store = None
         self.sql_db = None
         self.sql_db_url = None
-        
+
+        # Score threshold for relevance (lower distance = more similar)
+        self.score_threshold = float(os.getenv("RAG_SCORE_THRESHOLD", "0.5"))
+
         if os.path.exists(self.db_path):
             self.vector_store = Chroma(
                 persist_directory=self.db_path,
@@ -59,14 +63,14 @@ class RAGRetriever:
         print(f"Loading PDF: {pdf_path}")
         loader = PDFMuxLoader(pdf_path, quality="high")
         documents = loader.load()
-        
+
         print(f"Loaded {len(documents)} pages. Splitting text...")
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, 
+            chunk_size=1000,
             chunk_overlap=100
         )
         chunks = text_splitter.split_documents(documents)
-        
+
         if self.vector_store is None:
             self.vector_store = Chroma.from_documents(
                 documents=chunks,
@@ -76,7 +80,7 @@ class RAGRetriever:
             )
         else:
             self.vector_store.add_documents(documents=chunks)
-            
+
         print("PDF ingestion complete!")
 
     def ingest_url(self, url: str):
@@ -86,14 +90,14 @@ class RAGRetriever:
         print(f"Loading URL: {url}")
         loader = WebBaseLoader(url)
         documents = loader.load()
-        
+
         print(f"Loaded {len(documents)} document(s). Splitting text...")
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, 
+            chunk_size=1000,
             chunk_overlap=100
         )
         chunks = text_splitter.split_documents(documents)
-        
+
         if self.vector_store is None:
             self.vector_store = Chroma.from_documents(
                 documents=chunks,
@@ -103,7 +107,7 @@ class RAGRetriever:
             )
         else:
             self.vector_store.add_documents(documents=chunks)
-            
+
         print("URL ingestion complete!")
 
     def connect_db(self, db_url: str):
@@ -143,10 +147,10 @@ Table Info:
 Question: {input}"""
         )
         write_query = create_sql_query_chain(self.llm, self.sql_db, prompt=sql_prompt.partial(dialect=dialect))
-        
+
         # 2. Tool to execute SQL query
         execute_query = QuerySQLDataBaseTool(db=self.sql_db)
-        
+
         # 3. Chain to answer based on query result
         answer_prompt = ChatPromptTemplate.from_template(
             """Given the following user question, corresponding SQL query, and SQL result, answer the user question.
@@ -156,9 +160,9 @@ SQL Query: {query}
 SQL Result: {result}
 Answer: """
         )
-        
+
         answer_chain = answer_prompt | self.llm | StrOutputParser()
-        
+
         # 4. Combine into a full chain
         chain = (
             RunnablePassthrough.assign(query=write_query).assign(
@@ -166,9 +170,9 @@ Answer: """
             )
             | answer_chain
         )
-        
+
         response = chain.invoke({"question": query})
-        
+
         return {
             "answer": response,
             "sources": [f"Database: {self.sql_db_url}"]
@@ -179,38 +183,38 @@ Answer: """
         Retrieve context from the vector store and answer the user's question using Groq.
         Considers chat_history (list of LangChain message objects) if provided.
         Returns the answer and the sources with page numbers.
+        Implements strict grounding: if retrieved documents are not sufficiently relevant,
+        returns a canned message without invoking the LLM.
         """
         if self.vector_store is None:
             raise ValueError("No documents loaded. Please ingest a PDF or URL first.")
         if chat_history is None:
             chat_history = []
 
-        retriever = self.vector_store.as_retriever(search_kwargs={"k": 4})
-        
-        # 1. Contextualize the question using chat history
-        contextualize_q_system_prompt = (
-            "Given a chat history and the latest user question "
-            "which might reference context in the chat history, "
-            "formulate a standalone question which can be understood "
-            "without the chat history. Do NOT answer the question, "
-            "just reformulate it if needed and otherwise return it as is."
+        # Retrieve documents with similarity scores
+        docs_and_scores = self.vector_store.similarity_search_with_score(
+            query, k=4
         )
-        contextualize_q_prompt = ChatPromptTemplate.from_messages([
-            ("system", contextualize_q_system_prompt),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}"),
-        ])
-        
-        history_aware_retriever = create_history_aware_retriever(
-            self.llm, retriever, contextualize_q_prompt
-        )
+        # Log scores for debugging
+        print(f"Query: {query}")
+        print(f"Scores: {[score for _, score in docs_and_scores]}")
+
+        # Filter by score threshold (lower distance = more similar)
+        filtered_docs = [doc for doc, score in docs_and_scores if score <= self.score_threshold]
+
+        # If no relevant documents, return early with canned response
+        if not filtered_docs:
+            return {
+                "answer": "I don't have enough information in the provided documents to answer that question.",
+                "sources": []
+            }
 
         # 2. Answer question using retrieved documents
         system_prompt = (
-            "You are an intelligent assistant. Use the following retrieved context "
-            "to answer the user's question. If you don't know the answer, just say "
-            "that you don't know. Keep the answer concise, but thoroughly answer "
-            "the question based on the context provided.\n\n"
+            "You are an intelligent assistant. Answer the user's question "
+            "using ONLY the provided context. If the context does not contain "
+            "sufficient information to answer the question, say that you don't "
+            "have enough information. Do not rely on external knowledge.\n\n"
             "{context}"
         )
         qa_prompt = ChatPromptTemplate.from_messages([
@@ -218,28 +222,28 @@ Answer: """
             MessagesPlaceholder("chat_history"),
             ("human", "{input}"),
         ])
-        
+
         question_answer_chain = create_stuff_documents_chain(self.llm, qa_prompt)
-        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-        
+
         # 3. Execute
-        response = rag_chain.invoke({
+        response = question_answer_chain.invoke({
             "input": query,
-            "chat_history": chat_history
+            "chat_history": chat_history,
+            "context": filtered_docs
         })
-        
-        # 4. Process sources
+
+        # 4. Process sources (use the filtered docs that were actually used)
         sources = []
-        for doc in response.get("context", []):
+        for doc in filtered_docs:
             source_file = doc.metadata.get("source", "Unknown file")
             page_num = doc.metadata.get("page")
-            
+
             if page_num is not None:
                 sources.append(f"Page {page_num} of {source_file}")
             else:
                 sources.append(f"Source: {source_file}")
-            
+
         return {
-            "answer": response["answer"],
-            "sources": list(set(sources)) 
+            "answer": response,
+            "sources": list(set(sources))
         }
