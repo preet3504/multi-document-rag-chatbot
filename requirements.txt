@@ -12,12 +12,7 @@ requests
 streamlit
 pypdf
 sentence-transformers
-fastapi
-uvicorn
-python-multipart
 sqlalchemy
 langchain-classic
 pymysql
-cryptography
 pysqlite3-binary; sys_platform == 'linux'
-langchain-pdfmux
