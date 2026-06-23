@@ -46,7 +46,7 @@ class RAGRetriever:
         self.sql_db_url = None
 
         # Score threshold for relevance (lower distance = more similar)
-        self.score_threshold = float(os.getenv("RAG_SCORE_THRESHOLD", "0.5"))
+        self.score_threshold = float(1.0)
 
         if os.path.exists(self.db_path):
             self.vector_store = Chroma(
